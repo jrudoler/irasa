@@ -3,12 +3,25 @@ import math
 import numpy as np
 import scipy as scp
 from fractions import Fraction
+import time
 import matplotlib.pyplot as plt
 plt.style.use('seaborn')
 
 class IRASA:
+    """
+    Irregular Resampling Auto Spectral Analysis. Separates 1/f fractal component from oscillatory component.
+    """
     def __init__(self, sig, f_range, samplerate = 1000,
                 hset = np.arange(1.1, 1.95, .05), flag_filter = 1, flag_detrend =  1):
+        """
+        Inputs:
+            sig - timeseries data (last axis (axis = -1) is time)
+            f_range - frequency range (1D array)
+            samplerate - sample rate in Hz
+            hset - array of scaling factors (>1)
+            flag_filter  - 1 or 0 (default 1): 1 means filtering before downsampling to avoid aliasing.
+            flag_detrend - 1 or 0 (default 1): 1 means detrending data before fft, otherwise 0
+        """
         self.sig = sig
         if f_range is None:
             self.f_range = (0, samplerate/4)
@@ -20,18 +33,13 @@ class IRASA:
         self.flag_detrend = flag_detrend
         self.ndim = sig.ndim
         
-        self.mixed, self.fractal, self.oscill, self.freq = self.__separate_fractal()
+        self.mixed, self.fractal, self.freq = self.__separate_fractal()
     
 
     def __separate_fractal(self):
         """
-        Inputs:
-            sig - timeseries data (last axis (axis = -1) is time)
-            f_range - frequency range (1D array)
-            samplerate - sample rate in Hz
-            hset - array of scaling factors (>1)
-            flag_filter  - 1 or 0 (default 1): 1 means filtering before downsampling to avoid aliasing.
-            flag_detrend - 1 or 0 (default 1): 1 means detrending data before fft, otherwise 0
+        Separate the fractal and oscillatory components of a timeseries. 
+        
         """
         
         
@@ -75,7 +83,8 @@ class IRASA:
 
         print('Computing fractal PSD')
         S_frac = np.take(np.stack([np.zeros_like(self.sig) for i in self.hset]), range(N_frac), -1)
-
+        
+        tic = time.time()
         for ih, h in enumerate(self.hset):
             Sh = np.take(np.zeros_like(self.sig), range(N_frac), -1)
             fr = Fraction(h)
@@ -111,7 +120,8 @@ class IRASA:
                 S1h = S1h + np.abs(np.take(p1h, range(N_frac), -1))**2
             S1h = S1h/N_subset
             S_frac[ih, :] = np.sqrt(Sh*S1h)
-
+        toc = time.time()
+        print(f"Time elapsed for FFT: {toc-tic:.4f} s")
         S_frac = np.median(S_frac, 0)
 
         mask = (freq>=self.f_range[0])&(freq<=self.f_range[1])
@@ -119,7 +129,7 @@ class IRASA:
         S_mixed = np.compress(mask, S_mixed, -1)
         S_frac = np.compress(mask, S_frac, -1)
 
-        return S_mixed, S_frac, S_mixed - S_frac, freq
+        return S_mixed, S_frac, freq
     
     def __get_taper(self, sig):
         taper = np.hanning(sig.shape[-1])
@@ -218,13 +228,13 @@ class IRASA:
         
         return p, plaw  
     
-    def logplot(self, xlim = None, ylim = (None,None), fit = False):
+    def logplot(self, xlim = None, ylim = (None, None), fit = False, f_range = None):
         """
         Plot the fractal and mixed components in of logged power.
         Automatically averages over all non-frequency dimensions
         """
         if fit:
-            p, p_law = self.plaw_fit()
+            p, p_law = self.plaw_fit(f_range)
         if self.ndim>1:
             frac = np.mean(self.fractal, axis = tuple(range(self.ndim-1)))
             mix = np.mean(self.mixed, axis = tuple(range(self.ndim-1)))
@@ -241,15 +251,17 @@ class IRASA:
             xlim = self.f_range
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
-        plt.legend()
+        plt.xlabel('Frequency')
+        plt.ylabel('Power')
+        plt.legend(loc=1)
     
-    def loglogplot(self, xlim = None, ylim = (None,None), fit = False):
+    def loglogplot(self, xlim = None, ylim = (None, None), fit = False, f_range = None):
         """
         Plot the fractal and mixed components in log-log scale.
         Automatically averages over all non-frequency dimensions
         """
         if fit:
-            p, p_law = self.plaw_fit()
+            p, p_law = self.plaw_fit(f_range)
         if self.ndim>1:
             frac = np.mean(self.fractal, axis = tuple(range(self.ndim-1)))
             mix = np.mean(self.mixed, axis = tuple(range(self.ndim-1)))
@@ -266,4 +278,19 @@ class IRASA:
             xlim = self.f_range
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
-        plt.legend()
+        plt.xlabel('Frequency')
+        plt.ylabel('Power')
+        plt.legend(loc=3)
+    
+    def plot_oscillatory(self, xlim = None, ylim = (None, None)):
+        if self.ndim>1:
+            frac = np.mean(self.fractal, axis = tuple(range(self.ndim-1)))
+            mix = np.mean(self.mixed, axis = tuple(range(self.ndim-1)))
+        else:
+            frac = self.fractal
+            mix = self.mixed
+        plt.plot(self.freq, np.log10(mix)-np.log10(frac))
+        if xlim is None:
+            xlim = self.f_range
+        plt.xlim(xlim[0], xlim[1])
+        plt.ylim(ylim[0], ylim[1])
