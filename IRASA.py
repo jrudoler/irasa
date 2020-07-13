@@ -1,7 +1,7 @@
 from scipy import signal
 import math
 import numpy as np
-import scipy as scp
+from scipy.interpolate import interp1d
 from fractions import Fraction
 import time
 import matplotlib.pyplot as plt
@@ -14,13 +14,13 @@ class IRASA:
     Separates 1/f fractal component from oscillatory component.
     """
 
-    def __init__(self, sig, f_range, samplerate=1000,
+    def __init__(self, sig, freqs=None, samplerate=1000,
                  hset=np.arange(1.1, 1.95, .05), flag_filter=1,
                  flag_detrend=1):
         """
         Inputs:
             sig - timeseries data (last axis (axis = -1) must be time/samples)
-            f_range - frequency range (1D array)
+            freqs - frequencies to be included in power spectrum (1D array)
             samplerate - sample rate in Hz
             hset - array of resampling factors (>1)
             flag_filter  - 1 or 0 (default 1): 1 means filtering before
@@ -28,16 +28,13 @@ class IRASA:
             flag_detrend - 1 or 0 (default 1): 1 means detrending data before fft
         """
         self.sig = sig
-        if f_range is None:
-            self.f_range = (0, samplerate / 4)
-        else:
-            self.f_range = f_range
+        self.freqs = freqs
         self.samplerate = samplerate
         self.hset = hset
         self.flag_filter = flag_filter
         self.flag_detrend = flag_detrend
         self.ndim = sig.ndim
-        self.mixed, self.fractal, self.freq = self.__separate_fractal()
+        self.mixed, self.fractal = self.__separate_fractal()
 
     def __separate_fractal(self):
         """
@@ -61,14 +58,14 @@ class IRASA:
             np.log2(math.ceil(round(self.hset[-1], 2) * N_data)))
 
         N_frac = int(n_fft / 2) + 1
-        freq = self.samplerate / 2 * np.linspace(0, 1, N_frac)
+        fft_freq = self.samplerate / 2 * np.linspace(0, 1, N_frac)
 
         # Compute spectrum of mixed data
         S_mixed = np.take(np.zeros_like(self.sig), range(N_frac), -1)
 
         taper = self.__get_taper(np.take(self.sig, range(N_data), -1))
         # Multi-dimensional input handled in taper func
-        for k in range(N_subset): # Sliding window
+        for k in range(N_subset):  # Sliding window
             i0 = L * k
             x1 = np.take(self.sig, range(i0, i0 + N_data), -1)
             p1 = np.fft.fft(x1 * taper, n_fft) / min(n_fft, x1.shape[-1])
@@ -94,7 +91,7 @@ class IRASA:
             for k in range(N_subset):  # upsampling
                 i0 = L * k
                 x1 = np.take(self.sig, range(i0, i0 + N_data), -1)
-                func = scp.interpolate.interp1d(
+                func = interp1d(
                     np.linspace(0, 1, x1.shape[-1]),
                     x1)
                 xh = func(np.linspace(
@@ -114,7 +111,7 @@ class IRASA:
                     x1 = np.take(self.sig_filtered, range(i0, i0 + N_data), -1)
                 else:
                     x1 = np.take(self.sig, range(i0, i0 + N_data), -1)
-                func = scp.interpolate.interp1d(
+                func = interp1d(
                     np.linspace(0, 1, x1.shape[-1]), x1)
                 x1h = func(np.linspace(
                     0, 1,
@@ -129,12 +126,18 @@ class IRASA:
         print(f"Time elapsed for FFT: {toc-tic:.4f} s")
         S_frac = np.median(S_frac, 0)
 
-        mask = (freq >= self.f_range[0]) & (freq <= self.f_range[1])
-        freq = freq[mask]
-        S_mixed = np.compress(mask, S_mixed, -1)
-        S_frac = np.compress(mask, S_frac, -1)
+        if self.freqs is None:
+            mask = (fft_freq >= 0) & (fft_freq <= self.samplerate / 4)
+            self.freqs = fft_freq[mask]
+            S_mixed = np.compress(mask, S_mixed, -1)
+            S_frac = np.compress(mask, S_frac, -1)
+        else:
+            func = interp1d(fft_freq, S_mixed)
+            S_mixed = func(self.freqs)
+            func = interp1d(fft_freq, S_frac)
+            S_frac = func(self.freqs)
 
-        return S_mixed, S_frac, freq
+        return S_mixed, S_frac
 
     def __get_taper(self, sig):
         """
@@ -220,14 +223,18 @@ class IRASA:
         ts_new = ts_new + trend
         return ts_new, filt
 
-    def plaw_fit(self, f_range=None):
-        if f_range is None:
-            f_range = self.f_range
-        mask = (self.freq >= f_range[0]) & (self.freq <= f_range[1])
-        log_freq = np.log10(self.freq[mask])
-        log_frac = np.log10(np.compress(mask, self.fractal, -1))
+    def plaw_fit(self):
+        """
+        Linear fit to the power spectrum in log-log coordinates. Works up to 3 dimensions.
+
+        Returns:
+        p - the fit parameters, with highest order first
+        plaw - the fit values at the frequencies being anlyzed (chosen during initialization)
+        """
+        log_freq = np.log10(self.freqs)
+        log_frac = np.log10(self.fractal)
         x2 = np.linspace(min(log_freq), max(log_freq), len(log_freq))
-        f = scp.interpolate.interp1d(log_freq, log_frac)
+        f = interp1d(log_freq, log_frac)
         y2 = f(x2)
 
         if self.ndim == 1:
@@ -251,13 +258,13 @@ class IRASA:
         self.fit = plaw
         return p, plaw
 
-    def psdplot(self, xlim=None, ylim=(None, None), fit=False, f_range=None):
+    def psdplot(self, xlim=(None, None), ylim=(None, None), fit=False):
         """
         Plot the fractal and mixed components of power spectral decomposition.
         Automatically averages over all non-frequency dimensions
         """
         if fit:
-            p, p_law = self.plaw_fit(f_range)
+            p, p_law = self.plaw_fit()
         if self.ndim > 1:
             frac = np.mean(self.fractal, axis=tuple(range(self.ndim - 1)))
             mix = np.mean(self.mixed, axis=tuple(range(self.ndim - 1)))
@@ -266,26 +273,23 @@ class IRASA:
         else:
             frac = self.fractal
             mix = self.mixed
-        plt.plot(self.freq, frac, c='r', label='Fractal', lw=1)
-        plt.plot(self.freq, mix, c='b', alpha=.4, label='Mixed', lw=1)
+        plt.plot(self.freqs, frac, c='r', label='Fractal', lw=1)
+        plt.plot(self.freqs, mix, c='b', alpha=.4, label='Mixed', lw=1)
         if fit:
-            plt.plot(self.freq, p_law, 'g--', label='Power Law Fit')
-        if xlim is None:
-            xlim = self.f_range
+            plt.plot(self.freqs, p_law, 'g--', label='Power Law Fit')
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
         plt.xlabel('Frequency')
         plt.ylabel('Power')
         plt.legend(loc=1)
 
-    def loglogplot(self, xlim=None, ylim=(None, None), fit=False,
-                   f_range=None):
+    def loglogplot(self, xlim=(None, None), ylim=(None, None), fit=False):
         """
         Plot the fractal and mixed components in log-log scale.
-        Automatically averages over all non-frequency dimensions
+        Automatically averages over all non-frequency dimensions.
         """
         if fit:
-            p, p_law = self.plaw_fit(f_range)
+            p, p_law = self.plaw_fit()
         if self.ndim > 1:
             frac = np.mean(self.fractal, axis=tuple(range(self.ndim - 1)))
             mix = np.mean(self.mixed, axis=tuple(range(self.ndim - 1)))
@@ -294,27 +298,27 @@ class IRASA:
         else:
             frac = self.fractal
             mix = self.mixed
-        plt.loglog(self.freq, frac, c='r', label='Fractal', lw=1)
-        plt.loglog(self.freq, mix, c='b', alpha=.4, label='Mixed', lw=1)
+        plt.loglog(self.freqs, frac, c='r', label='Fractal', lw=1)
+        plt.loglog(self.freqs, mix, c='b', alpha=.4, label='Mixed', lw=1)
         if fit:
-            plt.loglog(self.freq, p_law, 'g--', label='Power Law Fit')
-        if xlim is None:
-            xlim = self.f_range
+            plt.loglog(self.freqs, p_law, 'g--', label='Power Law Fit')
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
         plt.xlabel('Frequency')
         plt.ylabel('Power')
         plt.legend(loc=3)
 
-    def plot_oscillatory(self, xlim=None, ylim=(None, None)):
+    def plot_oscillatory(self, xlim=(None, None), ylim=(None, None)):
+        """
+        Plot the oscillatory component, which is equal to the difference of the
+        mixed signal and fractal components.
+        """
         if self.ndim > 1:
             frac = np.mean(self.fractal, axis=tuple(range(self.ndim - 1)))
             mix = np.mean(self.mixed, axis=tuple(range(self.ndim - 1)))
         else:
             frac = self.fractal
             mix = self.mixed
-        plt.plot(self.freq, mix - frac)
-        if xlim is None:
-            xlim = self.f_range
+        plt.plot(self.freqs, mix - frac)
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
