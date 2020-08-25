@@ -51,20 +51,19 @@ class IRASA:
         N_data = 2 ** math.floor(np.log2(N_total * 0.9))
         # N_subset is fixed at 15
         N_subset = 15
-        # Compute the auto-power spectrum of the originally sampled time series
+        # The increment for the sliding window
         L = math.floor((N_total - N_data) / (N_subset - 1))
         # Need to do fft without truncating
         n_fft = 2 ** math.ceil(
             np.log2(math.ceil(round(self.hset[-1], 2) * N_data)))
-
         N_frac = int(n_fft / 2) + 1
+        # sample values in frequency space
         fft_freq = self.samplerate / 2 * np.linspace(0, 1, N_frac)
 
         # Compute spectrum of mixed data
-        S_mixed = np.take(np.zeros_like(self.sig), range(N_frac), -1)
-
-        taper = self.__get_taper(np.take(self.sig, range(N_data), -1))
+        S_mixed = np.zeros(self.sig.shape[:-1] + (N_frac,))
         # Multi-dimensional input handled in taper func
+        taper = self.__get_taper(np.take(self.sig, range(N_data), -1))
         for k in range(N_subset):  # Sliding window
             i0 = L * k
             x1 = np.take(self.sig, range(i0, i0 + N_data), -1)
@@ -81,12 +80,10 @@ class IRASA:
             )
 
         print('Computing fractal PSD')
-        S_frac = np.take(
-            np.stack([np.zeros_like(self.sig) for i in self.hset]),
-            range(N_frac), -1)
+        S_frac = np.zeros((len(self.hset),) + self.sig.shape[:-1] + (N_frac,))
         tic = time.time()
         for ih, h in enumerate(self.hset):
-            Sh = np.take(np.zeros_like(self.sig), range(N_frac), -1)
+            Sh = np.zeros(self.sig.shape[:-1] + (N_frac,))
             fr = Fraction(h)
             for k in range(N_subset):  # upsampling
                 i0 = L * k
@@ -104,7 +101,7 @@ class IRASA:
                 Sh = Sh + np.abs(np.take(ph, range(N_frac), -1))**2
             Sh = Sh / N_subset
 
-            S1h = np.take(np.zeros_like(self.sig), range(N_frac), -1)
+            S1h = np.zeros(self.sig.shape[:-1] + (N_frac,))
             for k in range(N_subset):  # downsampling
                 i0 = L * k
                 if self.flag_filter:
@@ -127,6 +124,7 @@ class IRASA:
         S_frac = np.median(S_frac, 0)
 
         if self.freqs is None:
+        	# assume max h is 2.0, want max frequency to be half the lowest samplerate
             mask = (fft_freq >= 0) & (fft_freq <= self.samplerate / 4)
             self.freqs = fft_freq[mask]
             S_mixed = np.compress(mask, S_mixed, -1)
