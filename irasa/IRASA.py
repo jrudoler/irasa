@@ -262,14 +262,6 @@ class IRASA:
         self.fit = plaw
         return p, plaw
 
-    def SSL_transform(x):
-        """
-        Shifted, Symmetric Log Transform to suppress extrema
-        Input:
-        x - a power spectrum to be transformed
-        """
-        return np.sign(x) * np.log10(np.abs(x)+1)
-
     def psdplot(self, xlim=(None, None), ylim=(None, None), fit=False):
         """
         Plot the fractal and mixed components of power spectral decomposition.
@@ -334,3 +326,11 @@ class IRASA:
         plt.plot(self.freqs, mix - frac)
         plt.xlim(xlim[0], xlim[1])
         plt.ylim(ylim[0], ylim[1])
+
+def SSL_transform(x):
+"""
+Shifted, Symmetric Log Transform to suppress extrema
+Input:
+x - a power spectrum to be transformed
+"""
+return np.sign(x) * np.log10(np.abs(x)+1)
