@@ -18,14 +18,20 @@ class IRASA:
                  hset=np.arange(1.1, 1.95, .05), flag_filter=1,
                  flag_detrend=1):
         """
-        Inputs:
-            sig - timeseries data (last axis (axis = -1) must be time/samples)
-            freqs - frequencies to be included in power spectrum (1D array)
-            samplerate - sample rate in Hz
-            hset - array of resampling factors (>1)
-            flag_filter  - 1 or 0 (default 1): 1 means filtering before
-                        downsampling to avoid aliasing.
-            flag_detrend - 1 or 0 (default 1): 1 means detrending data before fft
+        Parameters
+        __________
+
+        sig - timeseries data (last axis (axis = -1) must be time/samples)
+        freqs - frequencies to be included in power spectrum (1D array)
+        samplerate - sample rate in Hz
+        hset - array of resampling factors (>1)
+        flag_filter  - 1 or 0 (default 1): 1 means filtering before downsampling to avoid aliasing.
+        flag_detrend - 1 or 0 (default 1): 1 means detrending data before fft
+        
+        Returns
+        __________
+        IRASA class instance
+
         """
         self.sig = sig
         self.freqs = freqs
