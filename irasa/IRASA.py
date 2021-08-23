@@ -328,9 +328,9 @@ class IRASA:
         plt.ylim(ylim[0], ylim[1])
 
 def SSL_transform(x):
-"""
-Shifted, Symmetric Log Transform to suppress extrema
-Input:
-x - a power spectrum to be transformed
-"""
-return np.sign(x) * np.log10(np.abs(x)+1)
+    """
+    Shifted, Symmetric Log Transform to suppress extrema
+    Input:
+    x - a power spectrum to be transformed
+    """
+    return np.sign(x) * np.log10(np.abs(x)+1)
