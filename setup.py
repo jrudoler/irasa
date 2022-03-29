@@ -1,4 +1,7 @@
-from distutils.core import setup, find_packages
+try:
+    from setuptools import setup, find_packages
+except ImportError:
+    from distutils.core import setup, find_packages
 
 setup(name='irasa',
       author="Joseph Rudoler",
